@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../store'
+import { aterm } from '../api'
 import type { AITool, ClaudeAgent } from '../types'
 
 export function Sidebar() {
@@ -11,26 +12,45 @@ export function Sidebar() {
   const refreshTools = useStore((s) => s.refreshTools)
 
   const agents = useStore((s) => s.agents)
-  const agentsRaw = useStore((s) => s.agentsRaw)
-  const agentsError = useStore((s) => s.agentsError)
   const agentsLoading = useStore((s) => s.agentsLoading)
+  const agentsCwd = useStore((s) => s.agentsCwd)
   const loadAgents = useStore((s) => s.loadAgents)
   const attachAgent = useStore((s) => s.attachAgent)
+  const toggleAgentEditor = useStore((s) => s.toggleAgentEditor)
 
-  const [showRaw, setShowRaw] = useState(false)
+  const [agentFilter, setAgentFilter] = useState('')
 
   const installed = tools.filter((t) => t.installed)
   const missing = tools.filter((t) => !t.installed)
   const claude = tools.find((t) => t.id === 'claude')
+
+  const filteredAgents = useMemo(() => {
+    const q = agentFilter.trim().toLowerCase()
+    if (!q) return agents
+    return agents.filter((a) =>
+      `${a.name} ${a.description} ${(a.tools ?? []).join(' ')}`.toLowerCase().includes(q),
+    )
+  }, [agents, agentFilter])
+
+  const projectAgents = filteredAgents.filter((a) => a.source === 'project')
+  const userAgents = filteredAgents.filter((a) => a.source === 'user')
 
   const launch = (tool: AITool) => {
     if (!tool.installed) return
     newSession({ tool })
   }
 
-  const openAgentsInPane = () => {
+  const openInteractive = () => {
     if (!claude) return
     newSession({ tool: { ...claude, args: ['agents'] } })
+  }
+
+  const handleAgentClick = (agent: ClaudeAgent, e: React.MouseEvent) => {
+    if (e.altKey) {
+      void aterm.claude.openAgent(agent.filePath)
+      return
+    }
+    attachAgent(agent)
   }
 
   return (
@@ -65,62 +85,72 @@ export function Sidebar() {
 
       <div className="sidebar__section sidebar__section--agents">
         <div className="sidebar__section-title">
-          <span>claude agents{agents.length > 0 ? ` · ${agents.length}` : ''}</span>
+          <span>Claude Agents{agents.length > 0 ? ` · ${agents.length}` : ''}</span>
           <div className="sidebar__title-actions">
-            {agentsRaw.length > 0 && (
-              <button
-                className="sidebar__rescan"
-                onClick={() => setShowRaw((v) => !v)}
-                title={showRaw ? 'Hide raw output' : 'Show raw command output'}
-              >{showRaw ? '–' : '⌥'}</button>
-            )}
             <button
               className="sidebar__rescan"
-              onClick={() => void loadAgents()}
-              title="Re-run `claude agents`"
+              onClick={() => void loadAgents(agentsCwd)}
+              title="Reload agents from disk"
             >↻</button>
             <button
               className="sidebar__rescan"
-              onClick={openAgentsInPane}
+              onClick={openInteractive}
               disabled={!claude?.installed}
               title="Open `claude agents` interactively in a new pane"
             >⤢</button>
+            <button
+              className="sidebar__rescan"
+              onClick={() => void aterm.claude.openAgentsDir()}
+              title="Reveal ~/.claude/agents in Finder"
+            >▤</button>
+            <button
+              className="sidebar__rescan sidebar__rescan--cta"
+              onClick={() => toggleAgentEditor(true)}
+              title="Create a new agent"
+            >+</button>
           </div>
         </div>
 
+        {agents.length > 5 && (
+          <input
+            className="sidebar__filter"
+            placeholder="Filter agents…"
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+          />
+        )}
+
         {agentsLoading && agents.length === 0 && (
-          <div className="sidebar__empty">Running <code>claude agents</code>…</div>
+          <div className="sidebar__empty">Loading agents…</div>
         )}
 
-        {!agentsLoading && agentsError && (
-          <div className="sidebar__error">
-            <div className="sidebar__error-text">{agentsError}</div>
-            {!claude?.installed && (
-              <div className="sidebar__empty-hint"><code>claude</code> not on PATH</div>
-            )}
-          </div>
-        )}
-
-        {!agentsLoading && !agentsError && agents.length === 0 && (
+        {!agentsLoading && agents.length === 0 && (
           <div className="sidebar__empty sidebar__empty--hint">
-            No agents reported.
-            <button className="sidebar__link" onClick={openAgentsInPane} disabled={!claude?.installed}>
-              Run `claude agents` in a pane →
+            No agents yet.
+            <button className="sidebar__link" onClick={() => toggleAgentEditor(true)}>
+              Create your first agent →
             </button>
           </div>
         )}
 
-        {agents.map((a) => (
-          <AgentRow
-            key={a.id + a.display}
-            agent={a}
-            onClick={() => attachAgent(a)}
-            disabled={!claude?.installed}
-          />
-        ))}
-
-        {showRaw && agentsRaw && (
-          <pre className="sidebar__raw">{agentsRaw}</pre>
+        {projectAgents.length > 0 && (
+          <div className="sidebar__agent-group">
+            <div className="sidebar__agent-group-title">Project</div>
+            {projectAgents.map((a) => (
+              <AgentRow key={a.id} agent={a} onClick={handleAgentClick} disabled={!claude?.installed} />
+            ))}
+          </div>
+        )}
+        {userAgents.length > 0 && (
+          <div className="sidebar__agent-group">
+            {projectAgents.length > 0 && <div className="sidebar__agent-group-title">User</div>}
+            {userAgents.map((a) => (
+              <AgentRow key={a.id} agent={a} onClick={handleAgentClick} disabled={!claude?.installed} />
+            ))}
+          </div>
+        )}
+        {agents.length > 0 && filteredAgents.length === 0 && (
+          <div className="sidebar__empty">No matches.</div>
         )}
       </div>
 
@@ -158,20 +188,30 @@ function AgentRow({
   disabled,
 }: {
   agent: ClaudeAgent
-  onClick: () => void
+  onClick: (a: ClaudeAgent, e: React.MouseEvent) => void
   disabled: boolean
 }) {
   return (
     <button
       className={`sidebar__agent ${disabled ? 'is-disabled' : ''}`}
-      onClick={() => !disabled && onClick()}
-      title={disabled ? '`claude` not installed' : `Attach: claude agents ${agent.id}`}
+      onClick={(e) => !disabled && onClick(agent, e)}
+      title={
+        `${agent.name}` +
+        (agent.description ? `\n\n${agent.description}` : '') +
+        `\n\nClick: launch claude --agent ${agent.name}` +
+        '\nAlt+Click: open agent file'
+      }
     >
       <div className="sidebar__agent-row1">
-        <span className="sidebar__agent-name">{agent.id}</span>
+        <span className="sidebar__agent-name">{agent.name}</span>
+        {agent.tools && (
+          <span className="sidebar__agent-tools" title={`Tools: ${agent.tools.join(', ')}`}>
+            {agent.tools.length}T
+          </span>
+        )}
       </div>
-      {agent.detail && (
-        <div className="sidebar__agent-desc">{agent.detail}</div>
+      {agent.description && (
+        <div className="sidebar__agent-desc">{agent.description}</div>
       )}
     </button>
   )

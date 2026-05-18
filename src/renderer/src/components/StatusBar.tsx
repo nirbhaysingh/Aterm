@@ -7,6 +7,8 @@ export function StatusBar() {
   const tools = useStore((s) => s.tools)
   const toggleSharedContext = useStore((s) => s.toggleSharedContext)
   const toggleCommandPalette = useStore((s) => s.toggleCommandPalette)
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
+  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
 
   const active = activeSessionId ? sessions[activeSessionId] : null
   const tool = active?.toolId ? tools.find((t) => t.id === active.toolId) : null
@@ -28,6 +30,13 @@ export function StatusBar() {
         </>
       )}
       <span className="statusbar__spacer" />
+      <button
+        className="statusbar__btn"
+        onClick={() => toggleSidebar()}
+        title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
+      >
+        {sidebarCollapsed ? '◧' : '◨'} ⌘B
+      </button>
       <button className="statusbar__btn" onClick={() => toggleCommandPalette(true)}>⌘K</button>
       <button className="statusbar__btn" onClick={() => toggleSharedContext()}>⌘J context</button>
     </footer>

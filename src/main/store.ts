@@ -10,6 +10,7 @@ const EMPTY: PersistedWorkspace = {
   activeTabId: null,
   sessions: [],
   sharedContext: '',
+  sidebarCollapsed: false,
 }
 
 export async function loadWorkspace(): Promise<PersistedWorkspace> {

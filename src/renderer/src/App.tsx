@@ -7,6 +7,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { SessionBrowser } from './components/SessionBrowser'
 import { SharedContext } from './components/SharedContext'
 import { StatusBar } from './components/StatusBar'
+import { AgentEditor } from './components/AgentEditor'
 import type { PaneNode } from './types'
 import './styles.css'
 
@@ -22,11 +23,21 @@ function findPaneIdForActiveSession(node: PaneNode, sessionId: string | null): s
   return null
 }
 
+function collectSessionIds(node: PaneNode, acc: string[] = []): string[] {
+  if (node.type === 'leaf') {
+    if (node.sessionId) acc.push(node.sessionId)
+    return acc
+  }
+  for (const c of node.children) collectSessionIds(c, acc)
+  return acc
+}
+
 export function App() {
   const hydrated = useStore((s) => s.hydrated)
   const tabs = useStore((s) => s.tabs)
   const activeTabId = useStore((s) => s.activeTabId)
   const sharedContextOpen = useStore((s) => s.sharedContextOpen)
+  const sidebarCollapsed = useStore((s) => s.sidebarCollapsed)
 
   useEffect(() => {
     void useStore.getState().hydrate()
@@ -35,8 +46,8 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        const { zoomedPaneId, commandPaletteOpen, sessionBrowserOpen } = useStore.getState()
-        if (zoomedPaneId && !commandPaletteOpen && !sessionBrowserOpen) {
+        const { zoomedPaneId, commandPaletteOpen, sessionBrowserOpen, agentEditorOpen } = useStore.getState()
+        if (zoomedPaneId && !commandPaletteOpen && !sessionBrowserOpen && !agentEditorOpen) {
           e.preventDefault()
           useStore.getState().toggleZoom(null)
           return
@@ -58,6 +69,11 @@ export function App() {
         return
       }
       const k = e.key.toLowerCase()
+      if (k === 'b') {
+        e.preventDefault()
+        useStore.getState().toggleSidebar()
+        return
+      }
       if (k === 'k') {
         e.preventDefault()
         useStore.getState().toggleCommandPalette()
@@ -72,8 +88,20 @@ export function App() {
         useStore.getState().newTab()
       } else if (k === 'w') {
         e.preventDefault()
-        const { activeTabId, tabs } = useStore.getState()
-        if (activeTabId && tabs.length > 1) useStore.getState().closeTab(activeTabId)
+        const state = useStore.getState()
+        const { activeTabId, tabs, activeSessionId } = state
+        const tab = tabs.find((t) => t.id === activeTabId)
+        if (!tab) return
+        if (e.shiftKey) {
+          if (tabs.length > 1) state.closeTab(activeTabId!)
+          return
+        }
+        const sessionIds = collectSessionIds(tab.root)
+        if (sessionIds.length > 1 && activeSessionId) {
+          state.closeSession(activeSessionId)
+        } else if (tabs.length > 1) {
+          state.closeTab(activeTabId!)
+        }
       } else if (k === '\\') {
         e.preventDefault()
         useStore.getState().toggleCommandPalette(true)
@@ -95,12 +123,12 @@ export function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <div className="app__titlebar">
         <span className="app__titlebar-text">ATERM</span>
       </div>
       <div className="app__body">
-        <Sidebar />
+        {!sidebarCollapsed && <Sidebar />}
         <main className="workspace">
           <TabBar />
           <div className="workspace__grid">
@@ -121,6 +149,7 @@ export function App() {
       <StatusBar />
       <CommandPalette />
       <SessionBrowser />
+      <AgentEditor />
     </div>
   )
 }

@@ -2,8 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc'
 import type {
   AITool,
-  ClaudeAgentsResult,
+  ClaudeAgent,
   ClaudeSessionMeta,
+  CreateAgentResult,
+  NewAgentInput,
   PersistedWorkspace,
 } from '../shared/ipc'
 
@@ -19,7 +21,12 @@ const api = {
     listSessions: (): Promise<ClaudeSessionMeta[]> => ipcRenderer.invoke(IPC.claudeSessionsList),
     readSession: (filePath: string): Promise<string> => ipcRenderer.invoke(IPC.claudeSessionRead, filePath),
     search: (query: string) => ipcRenderer.invoke(IPC.claudeSessionSearch, query),
-    listAgents: (): Promise<ClaudeAgentsResult> => ipcRenderer.invoke(IPC.claudeAgentsList),
+    listAgents: (projectCwd?: string): Promise<ClaudeAgent[]> =>
+      ipcRenderer.invoke(IPC.claudeAgentsList, projectCwd),
+    openAgent: (filePath: string): Promise<boolean> => ipcRenderer.invoke(IPC.claudeAgentOpen, filePath),
+    openAgentsDir: (): Promise<void> => ipcRenderer.invoke(IPC.claudeAgentsDirOpen),
+    createAgent: (input: NewAgentInput): Promise<CreateAgentResult> =>
+      ipcRenderer.invoke(IPC.claudeAgentCreate, input),
   },
   pty: {
     spawn: (args: { sessionId: string; command: string; args: string[]; cwd: string; cols: number; rows: number }) =>

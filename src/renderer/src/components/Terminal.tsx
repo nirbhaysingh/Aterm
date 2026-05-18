@@ -47,6 +47,7 @@ export function TerminalPane({ session, paneId, isActive, onFocus }: Props) {
   const appendShared = useStore((s) => s.appendSharedContext)
   const zoomedPaneId = useStore((s) => s.zoomedPaneId)
   const toggleZoom = useStore((s) => s.toggleZoom)
+  const closeSession = useStore((s) => s.closeSession)
   const isZoomed = zoomedPaneId === paneId
   const isHidden = zoomedPaneId !== null && !isZoomed
 
@@ -196,6 +197,17 @@ export function TerminalPane({ session, paneId, isActive, onFocus }: Props) {
             onClick={() => toggleZoom(paneId)}
           >
             {isZoomed ? '⤡' : '⤢'}
+          </button>
+          <button
+            type="button"
+            className="term-pane__btn term-pane__btn--close"
+            title="Close pane (⌘W)"
+            onClick={(e) => {
+              e.stopPropagation()
+              closeSession(session.id)
+            }}
+          >
+            ✕
           </button>
         </div>
       </div>

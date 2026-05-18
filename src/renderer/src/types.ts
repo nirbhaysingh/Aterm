@@ -1,8 +1,9 @@
 export type {
   AITool,
   ClaudeAgent,
-  ClaudeAgentsResult,
   ClaudeSessionMeta,
+  CreateAgentResult,
+  NewAgentInput,
   PaneNode,
   SessionMeta,
   WorkspaceTab,

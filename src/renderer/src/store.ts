@@ -1,5 +1,13 @@
 import { create } from 'zustand'
-import type { AITool, ClaudeAgent, PaneNode, SessionMeta, WorkspaceTab } from './types'
+import type {
+  AITool,
+  ClaudeAgent,
+  CreateAgentResult,
+  NewAgentInput,
+  PaneNode,
+  SessionMeta,
+  WorkspaceTab,
+} from './types'
 import { aterm } from './api'
 
 function uid(prefix = 'id'): string {
@@ -86,9 +94,10 @@ type Store = {
   cwdDefault: string
   hydrated: boolean
   agents: ClaudeAgent[]
-  agentsRaw: string
-  agentsError: string | null
   agentsLoading: boolean
+  agentsCwd: string | null
+  agentEditorOpen: boolean
+  sidebarCollapsed: boolean
 
   hydrate: () => Promise<void>
   persist: () => Promise<void>
@@ -115,8 +124,11 @@ type Store = {
   toggleSharedContext: (open?: boolean) => void
   toggleZoom: (paneId?: string | null) => void
 
-  loadAgents: () => Promise<void>
+  loadAgents: (cwd?: string | null) => Promise<void>
   attachAgent: (agent: ClaudeAgent) => void
+  toggleAgentEditor: (open?: boolean) => void
+  createAgent: (input: NewAgentInput) => Promise<CreateAgentResult>
+  toggleSidebar: (open?: boolean) => void
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -133,9 +145,10 @@ export const useStore = create<Store>((set, get) => ({
   cwdDefault: '~',
   hydrated: false,
   agents: [],
-  agentsRaw: '',
-  agentsError: null,
   agentsLoading: false,
+  agentsCwd: null,
+  agentEditorOpen: false,
+  sidebarCollapsed: false,
 
   hydrate: async () => {
     const [tools, persisted, env] = await Promise.all([
@@ -151,13 +164,14 @@ export const useStore = create<Store>((set, get) => ({
       tabs: persisted.tabs,
       activeTabId: persisted.activeTabId,
       sharedContext: persisted.sharedContext,
+      sidebarCollapsed: persisted.sidebarCollapsed ?? false,
       cwdDefault: env.home,
       hydrated: true,
     })
     if (persisted.tabs.length === 0) {
       get().newTab('Workspace')
     }
-    void get().loadAgents()
+    void get().loadAgents(currentCwd(get()))
   },
 
   persist: async () => {
@@ -168,6 +182,7 @@ export const useStore = create<Store>((set, get) => ({
       activeTabId: s.activeTabId,
       sessions: Object.values(s.sessions),
       sharedContext: s.sharedContext,
+      sidebarCollapsed: s.sidebarCollapsed,
     })
   },
 
@@ -206,6 +221,7 @@ export const useStore = create<Store>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === tabId)
     set({ activeTabId: tabId, activeSessionId: tab?.activeSessionId ?? null, zoomedPaneId: null })
     void get().persist()
+    void get().loadAgents(currentCwd(get()))
   },
 
   renameTab: (tabId, title) => {
@@ -274,6 +290,7 @@ export const useStore = create<Store>((set, get) => ({
       }
     })
     void get().persist()
+    void get().loadAgents(currentCwd(get()))
     return sessionId
   },
 
@@ -285,13 +302,17 @@ export const useStore = create<Store>((set, get) => ({
       tabs: tabs.map((t) => (t.id === activeTabId ? { ...t, activeSessionId: sessionId } : t)),
     })
     void get().persist()
+    void get().loadAgents(currentCwd(get()))
   },
 
   closeSession: (sessionId) => {
     void aterm.pty.kill(sessionId)
     set((st) => {
+      let removedPaneId: string | null = null
       const tabs = st.tabs.map((t) => {
-        const stripped = removePane(t.root, getPaneIdForSession(t.root, sessionId) ?? '')
+        const paneId = getPaneIdForSession(t.root, sessionId)
+        if (paneId) removedPaneId = paneId
+        const stripped = removePane(t.root, paneId ?? '')
         const root: PaneNode =
           stripped ??
           ({ id: uid('pane'), type: 'leaf', sessionId: '' } as PaneNode)
@@ -301,10 +322,12 @@ export const useStore = create<Store>((set, get) => ({
       const sessions = { ...st.sessions }
       delete sessions[sessionId]
       const activeTab = tabs.find((t) => t.id === st.activeTabId)
+      const zoomedPaneId = st.zoomedPaneId === removedPaneId ? null : st.zoomedPaneId
       return {
         tabs,
         sessions,
         activeSessionId: activeTab?.activeSessionId ?? null,
+        zoomedPaneId,
       }
     })
     void get().persist()
@@ -370,21 +393,14 @@ export const useStore = create<Store>((set, get) => ({
       return { zoomedPaneId: st.zoomedPaneId === paneId ? null : paneId }
     }),
 
-  loadAgents: async () => {
-    set({ agentsLoading: true })
+  loadAgents: async (cwd) => {
+    const normalized = cwd && cwd.length > 0 ? cwd : null
+    set({ agentsLoading: true, agentsCwd: normalized })
     try {
-      const result = await aterm.claude.listAgents()
-      set({
-        agents: result.agents,
-        agentsRaw: result.raw,
-        agentsError: result.error ?? null,
-        agentsLoading: false,
-      })
-    } catch (e) {
-      set({
-        agentsLoading: false,
-        agentsError: e instanceof Error ? e.message : String(e),
-      })
+      const agents = await aterm.claude.listAgents(normalized ?? undefined)
+      set({ agents, agentsLoading: false })
+    } catch {
+      set({ agentsLoading: false })
     }
   },
 
@@ -392,10 +408,27 @@ export const useStore = create<Store>((set, get) => ({
     const state = get()
     const claude = state.tools.find((t) => t.id === 'claude')
     if (!claude) return
+    const cwd = agent.source === 'project' && agent.projectPath ? agent.projectPath : state.cwdDefault
     state.newSession({
-      tool: { ...claude, args: ['agents', agent.id] },
-      cwd: state.cwdDefault,
+      tool: { ...claude, args: ['--agent', agent.name] },
+      cwd,
     })
+  },
+
+  toggleAgentEditor: (open) =>
+    set((st) => ({ agentEditorOpen: open ?? !st.agentEditorOpen })),
+
+  toggleSidebar: (open) => {
+    set((st) => ({ sidebarCollapsed: open !== undefined ? !open : !st.sidebarCollapsed }))
+    void get().persist()
+  },
+
+  createAgent: async (input) => {
+    const result = await aterm.claude.createAgent(input)
+    if (result.ok) {
+      await get().loadAgents(get().agentsCwd)
+    }
+    return result
   },
 }))
 
@@ -415,5 +448,10 @@ function firstLeafSession(node: PaneNode): string | null {
     if (id) return id
   }
   return null
+}
+
+function currentCwd(state: { sessions: Record<string, SessionMeta>; activeSessionId: string | null }): string | null {
+  if (!state.activeSessionId) return null
+  return state.sessions[state.activeSessionId]?.cwd ?? null
 }
 

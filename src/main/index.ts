@@ -1,13 +1,14 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'path'
 import os from 'os'
+import fs from 'fs/promises'
 import { PtyManager } from './pty'
 import { listAITools } from './tools'
 import { listClaudeSessions, readClaudeSession, searchClaudeSessions } from './claude-sessions'
-import { listClaudeAgents } from './claude-agents'
+import { listClaudeAgents, userAgentsDir, createAgent } from './claude-agents'
 import { loadWorkspace, saveWorkspace } from './store'
 import { loadUserShellEnv } from './fix-path'
-import { IPC, type PersistedWorkspace } from '../shared/ipc'
+import { IPC, type PersistedWorkspace, type NewAgentInput } from '../shared/ipc'
 
 loadUserShellEnv()
 
@@ -54,7 +55,21 @@ function registerIpc(): void {
   ipcMain.handle(IPC.claudeSessionRead, (_e, filePath: string) => readClaudeSession(filePath))
   ipcMain.handle(IPC.claudeSessionSearch, (_e, query: string) => searchClaudeSessions(query))
 
-  ipcMain.handle(IPC.claudeAgentsList, () => listClaudeAgents())
+  ipcMain.handle(IPC.claudeAgentsList, (_e, projectCwd?: string) => listClaudeAgents(projectCwd))
+  ipcMain.handle(IPC.claudeAgentOpen, async (_e, filePath: string) => {
+    const err = await shell.openPath(filePath)
+    return err.length === 0
+  })
+  ipcMain.handle(IPC.claudeAgentsDirOpen, async () => {
+    const dir = userAgentsDir()
+    try {
+      await fs.mkdir(dir, { recursive: true })
+    } catch {
+      // ignore
+    }
+    await shell.openPath(dir)
+  })
+  ipcMain.handle(IPC.claudeAgentCreate, (_e, input: NewAgentInput) => createAgent(input))
 
   ipcMain.handle(
     IPC.ptySpawn,

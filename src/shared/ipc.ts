@@ -11,13 +11,29 @@ export type AITool = {
 
 export type ClaudeAgent = {
   id: string
-  display: string
-  detail?: string
+  name: string
+  description: string
+  tools: string[] | null
+  model?: string
+  source: 'user' | 'project'
+  projectPath?: string
+  filePath: string
 }
 
-export type ClaudeAgentsResult = {
-  agents: ClaudeAgent[]
-  raw: string
+export type NewAgentInput = {
+  name: string
+  description: string
+  tools?: string[]
+  model?: string
+  prompt: string
+  scope: 'user' | 'project'
+  projectPath?: string
+}
+
+export type CreateAgentResult = {
+  ok: boolean
+  filePath?: string
+  name?: string
   error?: string
 }
 
@@ -59,6 +75,7 @@ export type PersistedWorkspace = {
   activeTabId: string | null
   sessions: SessionMeta[]
   sharedContext: string
+  sidebarCollapsed?: boolean
 }
 
 export type IpcEvents = {
@@ -73,6 +90,9 @@ export const IPC = {
   claudeSessionRead: 'claude:session:read',
   claudeSessionSearch: 'claude:session:search',
   claudeAgentsList: 'claude:agents:list',
+  claudeAgentOpen: 'claude:agent:open',
+  claudeAgentsDirOpen: 'claude:agents:dir:open',
+  claudeAgentCreate: 'claude:agent:create',
   ptySpawn: 'pty:spawn',
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
